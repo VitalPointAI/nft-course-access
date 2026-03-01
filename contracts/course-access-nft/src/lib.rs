@@ -268,7 +268,7 @@ impl CourseAccessNFT {
 
         if let Some(n) = name { package.name = n; }
         if let Some(d) = description { package.description = d; }
-        if let Some(m) = media { package.media = m; }
+        if let Some(m) = media { package.media = Some(m); }
         if let Some(a) = is_active { package.is_active = a; }
 
         self.packages.insert(package_id, package);
@@ -481,7 +481,7 @@ impl CourseAccessNFT {
         let current_time = env::block_timestamp();
 
         for token_id in tokens.iter() {
-            if let Some(pass) = self.access_pass_by_id.get(&token_id) {
+            if let Some(pass) = self.access_pass_by_id.get(token_id) {
                 if pass.course_id == course_id {
                     // Check expiry
                     if let Some(expires) = &pass.expires_at {
@@ -509,7 +509,7 @@ impl CourseAccessNFT {
         let current_time = env::block_timestamp();
 
         for token_id in tokens.iter() {
-            if let Some(pass) = self.access_pass_by_id.get(&token_id) {
+            if let Some(pass) = self.access_pass_by_id.get(token_id) {
                 if pass.course_id == course_id {
                     // Return if not expired
                     if let Some(expires) = &pass.expires_at {
@@ -533,7 +533,7 @@ impl CourseAccessNFT {
             .map(|tokens| {
                 tokens
                     .iter()
-                    .filter_map(|token_id| self.access_pass_by_id.get(&token_id).cloned())
+                    .filter_map(|token_id| self.access_pass_by_id.get(token_id).cloned())
                     .collect()
             })
             .unwrap_or_default()
@@ -553,7 +553,7 @@ impl CourseAccessNFT {
             .map(|pkg_ids| {
                 pkg_ids
                     .iter()
-                    .filter_map(|id| self.packages.get(&id).cloned())
+                    .filter_map(|id| self.packages.get(id).cloned())
                     .collect()
             })
             .unwrap_or_default()
@@ -596,7 +596,7 @@ impl CourseAccessNFT {
     }
 
     pub fn nft_metadata(&self) -> NFTContractMetadata {
-        self.metadata.get().expect("Metadata not initialized").clone()
+        self.metadata.get().as_ref().expect("Metadata not initialized").clone()
     }
 
     pub fn nft_total_supply(&self) -> U128 {
