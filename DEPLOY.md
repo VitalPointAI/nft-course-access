@@ -44,7 +44,7 @@ near deploy course-access.vpacademy.near target/near/course_access_nft.wasm
 ```bash
 near call course-access.vpacademy.near new '{
   "owner_id": "vpacademy.near",
-  "treasury": "vitalpointai.near",
+  "treasury": "vpacademy.near",
   "metadata": {
     "spec": "nft-1.0.0",
     "name": "VP Academy Course Access",
@@ -102,7 +102,7 @@ near view course-access.vpacademy.near nft_tokens_for_owner '{
 ## Contract Addresses
 
 - **Contract:** `course-access.vpacademy.near`
-- **Treasury:** `vitalpointai.near` (receives USDC payments)
+- **Treasury:** `vpacademy.near` (receives USDC payments)
 - **Owner:** `vpacademy.near`
 
 ## NPM Package
