@@ -1,0 +1,68 @@
+{
+  "name": "@vitalpoint/nft-course-access",
+  "version": "0.1.0",
+  "description": "NFT-based course access with NEAR Intents cross-chain payments and Stripe fallback",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./server": {
+      "import": "./dist/server/index.mjs",
+      "require": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+    },
+    "./client": {
+      "import": "./dist/client/index.mjs",
+      "require": "./dist/client/index.js",
+      "types": "./dist/client/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint src/",
+    "test": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "next": ">=14.0.0"
+  },
+  "dependencies": {
+    "@near-js/accounts": "^1.0.0",
+    "@near-js/crypto": "^1.0.0",
+    "@near-js/keystores": "^0.0.12",
+    "@near-js/providers": "^0.2.0",
+    "@near-js/transactions": "^1.0.0",
+    "@near-wallet-selector/core": "^8.9.0",
+    "stripe": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "keywords": [
+    "near",
+    "nft",
+    "course",
+    "access",
+    "intents",
+    "chain-abstraction",
+    "stripe"
+  ],
+  "author": "VitalPoint AI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VitalPointAI/nft-course-access"
+  }
+}
