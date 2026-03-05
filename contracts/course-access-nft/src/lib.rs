@@ -27,6 +27,7 @@ pub enum StorageKey {
     StripeWhitelist,
     UsedIntentIds,
     UsedStripeSessionIds,
+    AdminMinters,
 }
 
 #[near(serializers = [json, borsh])]
@@ -158,6 +159,8 @@ pub struct CourseAccessNFT {
     pub intents_callers: IterableSet<AccountId>,
     pub stripe_callers: IterableSet<AccountId>,
     
+    pub admin_minters: IterableSet<AccountId>,
+
     // Replay protection
     pub used_intent_ids: IterableSet<String>,
     pub used_stripe_session_ids: IterableSet<String>,
@@ -201,6 +204,47 @@ impl CourseAccessNFT {
             next_package_id: 1,
             intents_callers: IterableSet::new(StorageKey::IntentsWhitelist),
             stripe_callers: IterableSet::new(StorageKey::StripeWhitelist),
+            admin_minters: IterableSet::new(StorageKey::AdminMinters),
+            used_intent_ids: IterableSet::new(StorageKey::UsedIntentIds),
+            used_stripe_session_ids: IterableSet::new(StorageKey::UsedStripeSessionIds),
+            usdc_token,
+        }
+    }
+
+    /// Migration function - re-initializes contract with new collection types
+    /// and replay protection fields. Call once after deploying the upgrade.
+    #[init(ignore_state)]
+    pub fn migrate(
+        owner_id: AccountId,
+        treasury: AccountId,
+        usdc_token: AccountId,
+    ) -> Self {
+        let metadata = NFTContractMetadata {
+            spec: "nft-1.0.0".to_string(),
+            name: "Course Access Pass".to_string(),
+            symbol: "CACC".to_string(),
+            icon: Some("https://academy.vitalpoint.ai/icon.png".to_string()),
+            base_uri: Some("https://academy.vitalpoint.ai/api/nft".to_string()),
+            reference: None,
+            reference_hash: None,
+        };
+
+        Self {
+            owner_id: owner_id.clone(),
+            treasury,
+            tokens_per_owner: LookupMap::new(StorageKey::TokensPerOwner),
+            tokens_by_id: IterableMap::new(StorageKey::TokensById),
+            token_metadata_by_id: IterableMap::new(StorageKey::TokenMetadataById),
+            access_pass_by_id: IterableMap::new(StorageKey::AccessPassById),
+            packages: IterableMap::new(StorageKey::CoursePackages),
+            packages_per_course: LookupMap::new(StorageKey::PackagesPerCourse { course_id_hash: vec![] }),
+            tokens_per_package: LookupMap::new(StorageKey::TokensPerPackage { package_id_hash: vec![] }),
+            metadata: LazyOption::new(StorageKey::NFTContractMetadata, Some(metadata)),
+            next_token_id: 1,
+            next_package_id: 1,
+            intents_callers: IterableSet::new(StorageKey::IntentsWhitelist),
+            stripe_callers: IterableSet::new(StorageKey::StripeWhitelist),
+            admin_minters: IterableSet::new(StorageKey::AdminMinters),
             used_intent_ids: IterableSet::new(StorageKey::UsedIntentIds),
             used_stripe_session_ids: IterableSet::new(StorageKey::UsedStripeSessionIds),
             usdc_token,
@@ -310,13 +354,27 @@ impl CourseAccessNFT {
         }
     }
 
-    /// Admin mint (for promotions/giveaways) - owner only
+    /// Add/remove admin minter whitelist
+    pub fn set_admin_minter(&mut self, account_id: AccountId, allowed: bool) {
+        self.assert_owner();
+        if allowed {
+            self.admin_minters.insert(account_id);
+        } else {
+            self.admin_minters.remove(&account_id);
+        }
+    }
+
+    /// Admin mint (for promotions/giveaways) - owner or whitelisted admin minters
     pub fn admin_mint(
         &mut self,
         package_id: PackageId,
         recipient: AccountId,
     ) -> TokenId {
-        self.assert_owner();
+        let caller = env::predecessor_account_id();
+        require!(
+            caller == self.owner_id || self.admin_minters.contains(&caller),
+            "Caller not authorized for admin minting"
+        );
         self.internal_mint(package_id, recipient, PaymentMethod::AdminMint, U128(0))
     }
 
