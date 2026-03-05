@@ -301,12 +301,18 @@ impl CourseAccessNFT {
     }
 
     /// Admin mint (for promotions/giveaways)
+    /// Admin mint (for promotions/giveaways)
+    /// Callable by owner OR whitelisted stripe callers (minter accounts)
     pub fn admin_mint(
         &mut self,
         package_id: PackageId,
         recipient: AccountId,
     ) -> TokenId {
-        self.assert_owner();
+        let caller = env::predecessor_account_id();
+        require!(
+            caller == self.owner_id || self.stripe_callers.contains(&caller),
+            "Caller not authorized for admin minting"
+        );
         self.internal_mint(package_id, recipient, PaymentMethod::AdminMint, U128(0))
     }
 
