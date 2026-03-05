@@ -1,6 +1,6 @@
-use near_sdk::store::{LookupMap, UnorderedMap, UnorderedSet, LazyOption};
+use near_sdk::store::{LookupMap, IterableMap, IterableSet, LazyOption};
 use near_sdk::json_types::{U128, U64};
-use near_sdk::{env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise};
+use near_sdk::{env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault};
 
 /// NFT-based Course Access Passes
 /// 
@@ -25,6 +25,8 @@ pub enum StorageKey {
     TokensPerPackage { package_id_hash: Vec<u8> },
     IntentsWhitelist,
     StripeWhitelist,
+    UsedIntentIds,
+    UsedStripeSessionIds,
 }
 
 #[near(serializers = [json, borsh])]
@@ -135,15 +137,15 @@ pub struct CourseAccessNFT {
     pub treasury: AccountId,
     
     // NFT storage
-    pub tokens_per_owner: LookupMap<AccountId, UnorderedSet<TokenId>>,
-    pub tokens_by_id: UnorderedMap<TokenId, Token>,
-    pub token_metadata_by_id: UnorderedMap<TokenId, TokenMetadata>,
-    pub access_pass_by_id: UnorderedMap<TokenId, AccessPass>,
+    pub tokens_per_owner: LookupMap<AccountId, IterableSet<TokenId>>,
+    pub tokens_by_id: IterableMap<TokenId, Token>,
+    pub token_metadata_by_id: IterableMap<TokenId, TokenMetadata>,
+    pub access_pass_by_id: IterableMap<TokenId, AccessPass>,
     
     // Package storage
-    pub packages: UnorderedMap<PackageId, CoursePackage>,
-    pub packages_per_course: LookupMap<String, UnorderedSet<PackageId>>,
-    pub tokens_per_package: LookupMap<PackageId, UnorderedSet<TokenId>>,
+    pub packages: IterableMap<PackageId, CoursePackage>,
+    pub packages_per_course: LookupMap<String, IterableSet<PackageId>>,
+    pub tokens_per_package: LookupMap<PackageId, IterableSet<TokenId>>,
     
     // Contract metadata
     pub metadata: LazyOption<NFTContractMetadata>,
@@ -153,9 +155,13 @@ pub struct CourseAccessNFT {
     pub next_package_id: u64,
     
     // Whitelists for minting permissions
-    pub intents_callers: UnorderedSet<AccountId>,
-    pub stripe_callers: UnorderedSet<AccountId>,
+    pub intents_callers: IterableSet<AccountId>,
+    pub stripe_callers: IterableSet<AccountId>,
     
+    // Replay protection
+    pub used_intent_ids: IterableSet<String>,
+    pub used_stripe_session_ids: IterableSet<String>,
+
     // USDC token contract on NEAR
     pub usdc_token: AccountId,
 }
@@ -178,21 +184,25 @@ impl CourseAccessNFT {
             reference_hash: None,
         };
 
+        require!(!env::state_exists(), "Contract already initialized");
+
         Self {
             owner_id: owner_id.clone(),
             treasury,
             tokens_per_owner: LookupMap::new(StorageKey::TokensPerOwner),
-            tokens_by_id: UnorderedMap::new(StorageKey::TokensById),
-            token_metadata_by_id: UnorderedMap::new(StorageKey::TokenMetadataById),
-            access_pass_by_id: UnorderedMap::new(StorageKey::AccessPassById),
-            packages: UnorderedMap::new(StorageKey::CoursePackages),
+            tokens_by_id: IterableMap::new(StorageKey::TokensById),
+            token_metadata_by_id: IterableMap::new(StorageKey::TokenMetadataById),
+            access_pass_by_id: IterableMap::new(StorageKey::AccessPassById),
+            packages: IterableMap::new(StorageKey::CoursePackages),
             packages_per_course: LookupMap::new(StorageKey::PackagesPerCourse { course_id_hash: vec![] }),
             tokens_per_package: LookupMap::new(StorageKey::TokensPerPackage { package_id_hash: vec![] }),
             metadata: LazyOption::new(StorageKey::NFTContractMetadata, Some(metadata)),
             next_token_id: 1,
             next_package_id: 1,
-            intents_callers: UnorderedSet::new(StorageKey::IntentsWhitelist),
-            stripe_callers: UnorderedSet::new(StorageKey::StripeWhitelist),
+            intents_callers: IterableSet::new(StorageKey::IntentsWhitelist),
+            stripe_callers: IterableSet::new(StorageKey::StripeWhitelist),
+            used_intent_ids: IterableSet::new(StorageKey::UsedIntentIds),
+            used_stripe_session_ids: IterableSet::new(StorageKey::UsedStripeSessionIds),
             usdc_token,
         }
     }
@@ -237,14 +247,14 @@ impl CourseAccessNFT {
         if let Some(pkg_set) = self.packages_per_course.get_mut(&course_id) {
             pkg_set.insert(package_id.clone());
         } else {
-            let mut new_set = UnorderedSet::new(StorageKey::PackagesPerCourse { course_id_hash: course_hash });
+            let mut new_set = IterableSet::new(StorageKey::PackagesPerCourse { course_id_hash: course_hash });
             new_set.insert(package_id.clone());
             self.packages_per_course.insert(course_id, new_set);
         }
 
         // Initialize token set for package
         let pkg_hash = env::sha256(package_id.as_bytes()).to_vec();
-        let token_set = UnorderedSet::new(StorageKey::TokensPerPackage { package_id_hash: pkg_hash });
+        let token_set = IterableSet::new(StorageKey::TokensPerPackage { package_id_hash: pkg_hash });
         self.tokens_per_package.insert(package_id.clone(), token_set);
 
         env::log_str(&format!("Created package: {}", package_id));
@@ -300,19 +310,13 @@ impl CourseAccessNFT {
         }
     }
 
-    /// Admin mint (for promotions/giveaways)
-    /// Admin mint (for promotions/giveaways)
-    /// Callable by owner OR whitelisted stripe callers (minter accounts)
+    /// Admin mint (for promotions/giveaways) - owner only
     pub fn admin_mint(
         &mut self,
         package_id: PackageId,
         recipient: AccountId,
     ) -> TokenId {
-        let caller = env::predecessor_account_id();
-        require!(
-            caller == self.owner_id || self.stripe_callers.contains(&caller),
-            "Caller not authorized for admin minting"
-        );
+        self.assert_owner();
         self.internal_mint(package_id, recipient, PaymentMethod::AdminMint, U128(0))
     }
 
@@ -332,6 +336,12 @@ impl CourseAccessNFT {
             self.intents_callers.contains(&env::predecessor_account_id()),
             "Caller not authorized for Intents minting"
         );
+
+        require!(
+            !self.used_intent_ids.contains(&intent_id),
+            "Intent ID already used"
+        );
+        self.used_intent_ids.insert(intent_id.clone());
 
         let package = self.packages.get(&package_id).expect("Package not found");
         require!(
@@ -360,6 +370,12 @@ impl CourseAccessNFT {
             self.stripe_callers.contains(&env::predecessor_account_id()),
             "Caller not authorized for Stripe minting"
         );
+
+        require!(
+            !self.used_stripe_session_ids.contains(&session_id),
+            "Stripe session ID already used"
+        );
+        self.used_stripe_session_ids.insert(session_id.clone());
 
         // Convert USD cents to USDC (6 decimals)
         // $49.00 = 4900 cents = 49_000000 USDC
@@ -454,7 +470,7 @@ impl CourseAccessNFT {
         if let Some(tokens_set) = self.tokens_per_owner.get_mut(&recipient) {
             tokens_set.insert(token_id.clone());
         } else {
-            let mut new_set = UnorderedSet::new(StorageKey::TokenPerOwnerInner {
+            let mut new_set = IterableSet::new(StorageKey::TokenPerOwnerInner {
                 account_id_hash: env::sha256(recipient.as_bytes()).to_vec(),
             });
             new_set.insert(token_id.clone());
@@ -624,6 +640,10 @@ impl CourseAccessNFT {
         _approval_id: Option<u64>,
         _memo: Option<String>,
     ) {
+        require!(
+            env::attached_deposit() == NearToken::from_yoctonear(1),
+            "Requires exactly 1 yoctoNEAR for security"
+        );
         let sender = env::predecessor_account_id();
         let token = self.tokens_by_id.get(&token_id).expect("Token not found").clone();
         require!(token.owner_id == sender, "Not token owner");
@@ -668,7 +688,7 @@ impl CourseAccessNFT {
         if let Some(to_tokens) = self.tokens_per_owner.get_mut(to) {
             to_tokens.insert(token_id.clone());
         } else {
-            let mut new_set = UnorderedSet::new(StorageKey::TokenPerOwnerInner {
+            let mut new_set = IterableSet::new(StorageKey::TokenPerOwnerInner {
                 account_id_hash: env::sha256(to.as_bytes()).to_vec(),
             });
             new_set.insert(token_id.clone());
